@@ -22,6 +22,7 @@ int Sensor2 = 2;
 // digital setup
 int blaeser_input = 8;
 int olievarme_input = 9;
+int lampe_output = 5;
 
 float temperature[3] = {0}; 
 float humidity[3] = {0};
@@ -49,6 +50,7 @@ unsigned long lastms = 0;
 unsigned long blaeserchgtimer = 0;
 unsigned int olievarmechgtimer = 0;
 unsigned int chgtime = 2000;
+unsigned int lampestate = 0;
 
 void setup() 
 { 
@@ -60,6 +62,7 @@ void setup()
 	}
 	
 	// start the Ethernet connection:
+	Serial.println("Lysthus controller");
 	Serial.println("Initialize Ethernet with DHCP:");
 	if (Ethernet.begin(mac) == 0) 
 	{
@@ -83,8 +86,10 @@ void setup()
 	nextMeasure = millis() + measureTime;
 	pinMode(blaeser_input, INPUT);
 	pinMode(olievarme_input, INPUT);
-	
+	pinMode(lampe_output, OUTPUT);
 	Udp.begin(localPort);	  
+	// turn off output
+	digitalWrite(lampe_output, HIGH);
 }
 
 // temperature and humidity measurement
@@ -240,6 +245,18 @@ void ReceiveMessage()
 			dtostrf(olievarmetime, 8, 0, tempstr);
 			olievarmetime = 0;
 		}		
+		else if(theVal.substring(0,1) == "5")
+		{
+			// turn on output
+			digitalWrite(lampe_output, LOW);
+			dtostrf(5, 8, 0, tempstr);
+		}
+		else if(theVal.substring(0,1) == "6")
+		{
+			// turn of output
+			digitalWrite(lampe_output, HIGH);
+			dtostrf(6, 8, 0, tempstr);
+		}
 		else
 		{				
 			Serial.println("error");
@@ -428,4 +445,5 @@ void loop()
 	
 	checkblaeser();
 	checkolieovn();	
+
 }		

@@ -1,14 +1,12 @@
 #include <SPI.h>
 #include <Ethernet.h>
 
-// Enter a MAC address for your controller below.
-// Newer Ethernet shields have a MAC address printed on a sticker on the shield
 byte mac[] = {
-  0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02
+  0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x03
 };
 
 // Ethernet UDP setup
-unsigned int localPort = 8888;
+unsigned int localPort = 5000; //8889
 EthernetUDP Udp;
 char packetBuffer[UDP_TX_PACKET_MAX_SIZE];
 
@@ -19,9 +17,10 @@ int Sens2_clockPin = 7;  // pin used for clock sensor 2  ude temp
 int Sens2_dataPin  = 6;  // pin used for data sensor 2   ude hum
 int Sensor1 = 1;
 int Sensor2 = 2;
+
 // digital setup
-int blaeser_input = 8;
-int olievarme_input = 9;
+const int off = 0;
+const int on = 1;
 int lampe_output = 5;
 
 float temperature[3] = {0}; 
@@ -31,26 +30,7 @@ unsigned long nextMeasure = 0;
 unsigned long measureTime = 10000; 
 static int nextSensor = Sensor1;
 
-const int off = 0;
-const int on = 1;
-const int chgon = 2;
-const int chgoff = 3;
-
-const unsigned long maxmilli = 4294967296;
- 
-int blaeserstate = off;
-int olievarmestate = off;
-unsigned long blaeserstart = 0;
-unsigned long olievarmestart = 0;
-unsigned long varmetemp = 0;
-unsigned long blaesertime = 0;
-unsigned long olievarmetime = 0;
-unsigned long lastms = 0;
-
-unsigned long blaeserchgtimer = 0;
-unsigned int olievarmechgtimer = 0;
-unsigned int chgtime = 2000;
-unsigned int lampestate = 0;
+static unsigned long firsttime = 0;
 
 void setup() 
 { 
@@ -62,34 +42,28 @@ void setup()
 	}
 	
 	// start the Ethernet connection:
-	Serial.println("Lysthus controller");
 	Serial.println("Initialize Ethernet with DHCP:");
 	if (Ethernet.begin(mac) == 0) 
 	{
 		Serial.println("Failed to configure Ethernet using DHCP");
 		if (Ethernet.hardwareStatus() == EthernetNoHardware) 
 		{
-			Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+			Serial.println("Ethernet shield not found");
 		} else if (Ethernet.linkStatus() == LinkOFF) 
 		{
 			Serial.println("Ethernet cable is not connected.");
 		}
-		// no point in carrying on, so do nothing forevermore:
+		// no point in carrying on
 		while (true) 
 		{
 			delay(1);
-		}	
+		}			
 	}
 	// print your local IP address:
 	Serial.print("My IP address: ");
 	Serial.println(Ethernet.localIP());
-	nextMeasure = millis() + measureTime;
-	pinMode(blaeser_input, INPUT);
-	pinMode(olievarme_input, INPUT);
-	pinMode(lampe_output, OUTPUT);
-	Udp.begin(localPort);	  
-	// turn off output
-	digitalWrite(lampe_output, HIGH);
+	pinMode(lampe_output, OUTPUT);	
+	Udp.begin(localPort);	
 }
 
 // temperature and humidity measurement
@@ -137,9 +111,9 @@ void SHT_sendCommand(int command, int datapin, int clockpin)
   digitalWrite(clockpin, HIGH);
   pinMode(datapin, INPUT);
 
-  if (digitalRead(datapin)) Serial.println("ACK error 0");
+ // if (digitalRead(datapin)) Serial.println("ACK error 0");
   digitalWrite(clockpin, LOW);
-  if (!digitalRead(datapin)) Serial.println("ACK error 1");
+ // if (!digitalRead(datapin)) Serial.println("ACK error 1");
 }
 
 
@@ -197,14 +171,14 @@ void measure(int sensor,int datapin, int clockpin)
 	temperature[sensor] = getTemperature(datapin, clockpin);
   	humidity[sensor] = getHumidity(datapin, clockpin);	
 }
-
 // end of temperature and humidity measurement
 //--------------------------------------------
+
 
 void ReceiveMessage()
 {
 	int packetSize = Udp.parsePacket();
-	  
+	 
 	if(packetSize)
 	{
 		for(int i=0;i<UDP_TX_PACKET_MAX_SIZE;i++) packetBuffer[i] = 0;
@@ -217,178 +191,49 @@ void ReceiveMessage()
 		}
 		String theVal = valIn;
 		int strIndex = theVal.length();
-		strcpy(tempstr, "" );
-		
-		if((theVal.substring(0,1) == "1") && (strIndex == 5)) // temperature sensor 1
-		{     		
-			dtostrf(temperature[Sensor1], 6, 2, tempstr);					
-		}		
-		else if(theVal.substring(0,1) == "2") // humidity sensor 1
-		{		
-			dtostrf(humidity[Sensor1], 6, 2, tempstr);			
-		}    
-		else if(theVal.substring(0,1) == "3") // temperature sensor 2
-		{		
-			dtostrf(temperature[Sensor2], 6, 2, tempstr);				
-		}
-		else if(theVal.substring(0,1) == "4") // humidity sensor 2
+		strcpy(tempstr, "" );		
+
+		int msg = theVal.substring(0,1).toInt();
+
+		switch (msg)
 		{
-			dtostrf(humidity[Sensor2], 6, 2, tempstr);			
-		}
-		else if(theVal.substring(0,1) == "9") // blæser tid
-		{
-			dtostrf(blaesertime, 8, 0, tempstr);
-			blaesertime = 0;						
-		}
-		else if((theVal.substring(0,1) == "1") && (theVal.substring(1,2) == "0")) // olieovn tid
-		{
-			dtostrf(olievarmetime, 8, 0, tempstr);
-			olievarmetime = 0;
-		}		
-		else if(theVal.substring(0,1) == "5")
-		{
-			// turn on output
-			digitalWrite(lampe_output, LOW);
-			dtostrf(5, 8, 0, tempstr);
-		}
-		else if(theVal.substring(0,1) == "6")
-		{
-			// turn of output
-			digitalWrite(lampe_output, HIGH);
-			dtostrf(6, 8, 0, tempstr);
-		}
-		else
-		{				
-			Serial.println("error");
-			strcpy(tempstr, "error");			
-		}		
-		
-		Udp.beginPacket(Udp.remoteIP(), localPort);
-		Udp.write(tempstr);
-		Udp.endPacket();				
+			case 1:	{	dtostrf(temperature[Sensor1], 6, 2, tempstr);					
+						break;
+					}
+
+			case 2:	{	dtostrf(humidity[Sensor1], 6, 2, tempstr);					
+						break;
+					}
+			case 3:	{	dtostrf(temperature[Sensor2], 6, 2, tempstr);					
+						break;
+					}
+			case 4:	{	dtostrf(humidity[Sensor2], 6, 2, tempstr);					
+						break;
+					}
+			case 5:	{							
+						digitalWrite(lampe_output, LOW);
+						strcpy(tempstr, "5" );					
+						break;
+					}
+			case 6:	{	digitalWrite(lampe_output, HIGH);
+						strcpy(tempstr, "6" );								
+						break;
+					}
+			default:{
+						strcpy(tempstr, "error");
+						break;
+					} 
+		} // switch 
+
+		Udp.beginPacket(Udp.remoteIP(),Udp.remotePort() );
+		Udp.write(tempstr);	
+		Udp.endPacket();
 	} 
 }
-   
-void checkblaeser()
-{
-	switch (blaeserstate)
-	{
-		case off:
-				{
-					if (digitalRead(blaeser_input))
-					{	
-						blaeserstart = millis();
-						blaeserstate = chgon;
-						blaeserchgtimer = (millis() + chgtime);
-						Serial.println("blaeser chg on");
-					}
-					break;
-				}
-
-		case chgon:
-				{
-					if(millis() > blaeserchgtimer) 
-					{	
-						Serial.println("blaeser on");
-						blaeserstate = on;
-					}	
-					break;
-				}
-
-		case chgoff:
-				{
-					if(millis() > blaeserchgtimer) 
-					{			
-						Serial.println("blaeser off");
-						blaeserstate = off;	
-					}	
-					break;
-				}
-
-		case on:
-				{	
-					if (!digitalRead(blaeser_input))	
-					{
-						if (millis() < blaeserstart)
-						{             
-							varmetemp = (maxmilli - blaeserstart) + millis();							
-						}else
-						{
-							varmetemp = millis() - blaeserstart;                    			
-						}
-						blaesertime += varmetemp;
-						blaeserchgtimer = (millis() + chgtime);
-						blaeserstate = chgoff;
-						Serial.print("blaeser chg off : ");
-						Serial.println(blaesertime / 1000);
-					}	
-					break;	
-				}		
-	}	
-}   
-
-void checkolieovn()
-{
-	switch (olievarmestate)
-	{
-		case off:
-				{
-					if (digitalRead(olievarme_input))
-					{	
-						olievarmestart = millis();
-						olievarmechgtimer = (millis() + chgtime);
-						olievarmestate = chgon;
-						Serial.println("olievarmer chg on");
-					}
-					break;
-				}
-					
-		case chgon:
-				{
-					if(millis() > olievarmechgtimer) 
-					{						
-						olievarmestate = on;
-						Serial.println("olievarmer on");
-					}	
-					break;
-				}
-
-		case chgoff:
-				{
-					if(millis() > olievarmechgtimer) 
-					{						
-						Serial.println("olievarmer off");
-						olievarmestate = off;	
-					}	
-					break;
-				}	
-
-		case on:
-				{	
-					if (!digitalRead(olievarme_input))	
-					{
-						if (millis() < olievarmestart)
-						{             
-							varmetemp = (maxmilli - olievarmestart) + millis();							
-						}else
-						{
-							varmetemp = millis() - olievarmestart;                    			
-						}
-						olievarmetime += varmetemp;
-						olievarmechgtimer = (millis() + chgtime);
-						olievarmestate = chgoff;
-						Serial.print("olievarmer chg off : ");
-						Serial.println(olievarmetime / 1000);
-					}	
-					break;	
-				}		
-	}
-	
-}
+  
 
 void loop() 
-{
-	static int cnt = 0;
+{	
 	switch (Ethernet.maintain()) 
 	{
 		case 1:
@@ -418,15 +263,7 @@ void loop()
 	ReceiveMessage(); 
 
 	static int firsttime = 1;
-	
-	// check if the millis() has been reset - happens after apr. 50 days
-	if (millis() < lastms)
-	{
-		nextMeasure = 0; // force new measurement
-		
-	}
-	lastms = millis();
-	
+
 	if (firsttime || (millis() >= nextMeasure))
 	{		
 		nextMeasure = millis() + measureTime;
@@ -442,8 +279,4 @@ void loop()
 			firsttime = 0;			
 		}
 	}
-	
-	checkblaeser();
-	checkolieovn();	
-
 }		
